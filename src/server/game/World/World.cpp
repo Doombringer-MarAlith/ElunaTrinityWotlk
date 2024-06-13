@@ -88,6 +88,8 @@
 #include "WeatherMgr.h"
 #ifdef ELUNA
 #include "LuaEngine.h"
+#include "ElunaLoader.h"
+#include "ElunaConfig.h"
 #endif
 #include "WhoListStorage.h"
 #include "WorldSession.h"
@@ -153,6 +155,12 @@ World::World()
 /// World destructor
 World::~World()
 {
+#ifdef ELUNA
+    // Delete world Eluna state
+    delete eluna;
+    eluna = nullptr;
+#endif
+
     ///- Empty the kicked session set
     while (!m_sessions.empty())
     {
@@ -1599,8 +1607,21 @@ void World::SetInitialWorldSettings()
 
 #ifdef ELUNA
     ///- Initialize Lua Engine
-    TC_LOG_INFO("server.loading", "Initialize Eluna Lua Engine...");
-    Eluna::Initialize();
+    TC_LOG_INFO("server.loading", "Loading Eluna config...");
+    sElunaConfig->Initialize();
+
+    ///- Initialize Lua Engine
+    if (sElunaConfig->IsElunaEnabled())
+    {
+        TC_LOG_INFO("server.loading", "Loading Lua scripts...");
+        sElunaLoader->LoadScripts();
+
+        if (sElunaConfig->GetConfig(CONFIG_ELUNA_SCRIPT_RELOADER))
+        {
+            TC_LOG_INFO("server.loading", "Loading Eluna script reloader...");
+            sElunaLoader->InitializeFileWatcher();
+        }
+    }
 #endif
 
     ///- Initialize pool manager
@@ -2087,6 +2108,14 @@ void World::SetInitialWorldSettings()
     TC_LOG_INFO("server.loading", "Loading Creature Text Locales...");
     sCreatureTextMgr->LoadCreatureTextLocales();
 
+#ifdef ELUNA
+    if (sElunaConfig->IsElunaEnabled())
+    {
+        TC_LOG_INFO("server.loading", "Starting Eluna world state...");
+        eluna = new Eluna(nullptr, sElunaConfig->IsElunaCompatibilityMode());
+    }
+#endif
+
     TC_LOG_INFO("server.loading", "Initializing Scripts...");
     sScriptMgr->Initialize();
     sScriptMgr->OnConfigLoad(false);                                // must be done after the ScriptMgr has been properly initialized
@@ -2222,10 +2251,8 @@ void World::SetInitialWorldSettings()
     InitGuildResetTime();
 
 #ifdef ELUNA
-    ///- Run eluna scripts.
-    // in multithread foreach: run scripts
-    sEluna->RunScripts();
-    sEluna->OnConfigLoad(false); // Must be done after Eluna is initialized and scripts have run.
+    if(GetEluna())
+        GetEluna()->OnConfigLoad(false); // Must be done after Eluna is initialized and scripts have run.
 #endif
 
     // Preload all cells, if required for the base maps
